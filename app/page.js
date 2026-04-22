@@ -1,11 +1,11 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { Home, Gamepad2, User, Wallet, ArrowDownToLine, ArrowUpFromLine, LogOut, Info, Loader2 } from 'lucide-react';
+import { Home, Gamepad2, User, Wallet, ArrowDownToLine, ArrowUpFromLine, LogOut, Info, Loader2, X } from 'lucide-react';
 import { supabase } from './supabase';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home'); 
-  const [currentUser, setCurrentUser] = useState(null); // NOW HOLDS REAL USER DATA
+  const [currentUser, setCurrentUser] = useState(null); 
 
   return (
     <div className="app-container">
@@ -46,7 +46,6 @@ function GameEngine({ currentUser, setCurrentUser }) {
   const [myRole, setMyRole] = useState(null); 
   const [oppChoice, setOppChoice] = useState(null);
 
-  // Securely update database balance
   const changeBalance = async (amount) => {
     const newBalance = currentUser.balance + amount;
     await supabase.from('users').update({ balance: newBalance }).eq('id', currentUser.id);
@@ -66,7 +65,7 @@ function GameEngine({ currentUser, setCurrentUser }) {
   const findMatch = async () => {
     if (currentUser.balance < 1000) return alert("Insufficient funds. Go to Profile to deposit.");
     
-    await changeBalance(-1000); // Deduct stake from real database
+    await changeBalance(-1000); 
     setGameState('searching');
     setSelectedNumber(null);
     setOppChoice(null);
@@ -84,7 +83,6 @@ function GameEngine({ currentUser, setCurrentUser }) {
       let currentMatchId;
 
       if (waitingMatch) {
-        // I am Player 2
         const { data: updatedMatch, error: updateError } = await supabase
           .from('matches')
           .update({ player2_id: currentUser.id, status: 'playing' })
@@ -98,7 +96,6 @@ function GameEngine({ currentUser, setCurrentUser }) {
         setGameState('playing');
         setTimer(10);
       } else {
-        // I am Player 1
         const { data: newMatch, error: insertError } = await supabase
           .from('matches')
           .insert([{ player1_id: currentUser.id, status: 'waiting' }])
@@ -134,7 +131,7 @@ function GameEngine({ currentUser, setCurrentUser }) {
     } catch (err) {
       alert("System Failed: " + err.message);
       setGameState('lobby');
-      await changeBalance(1000); // Refund on error
+      await changeBalance(1000); 
     }
   };
 
@@ -161,14 +158,14 @@ function GameEngine({ currentUser, setCurrentUser }) {
       await changeBalance(1800);
     } else if (myMove === oppMove) {
       setResult('TIE');
-      await changeBalance(1000); // Refund
+      await changeBalance(1000); 
     } else if (
       (myMove === 1 && oppMove === 3) ||
       (myMove === 2 && oppMove === 1) ||
       (myMove === 3 && oppMove === 2)
     ) {
       setResult('WIN');
-      await changeBalance(1800); // Winnings minus rake
+      await changeBalance(1800); 
     } else {
       setResult('LOSS');
     }
@@ -242,19 +239,38 @@ function GameEngine({ currentUser, setCurrentUser }) {
   );
 }
 
-function LandingView({ setActiveTab }) {
-  return (
-    <div className="screen">
-      <h1 className="title">123 BET</h1>
-      <p className="subtitle">Fastest PvP in Tanzania</p>
-      <div className="card"><h2 style={{ display: 'flex', alignItems: 'center', color: '#cffafe', marginBottom: '15px' }}><Info size={20} style={{ marginRight: '8px', color: '#38bdf8' }}/> How to Play</h2><p style={{ color: '#cbd5e1', fontSize: '0.9rem', lineHeight: '1.5' }}><strong>1.</strong> Match against a real player. Stake TZS 1,000.<br/><strong>2.</strong> You have 10 seconds to choose 1, 2, or 3.<br/><strong>3.</strong> The winner takes the pot instantly!</p></div>
-      <div className="card" style={{ background: 'rgba(49, 46, 129, 0.4)', borderColor: 'rgba(99, 102, 241, 0.3)' }}><h2 style={{ textAlign: 'center', color: '#e0e7ff', marginBottom: '20px' }}>Rules of Combat</h2><div className="rule-row"><div className="rule-box winner">1</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">3</div></div><div className="rule-row"><div className="rule-box winner">2</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">1</div></div><div className="rule-row"><div className="rule-box winner">3</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">2</div></div></div>
-      <button className="btn-primary" onClick={() => setActiveTab('play')}>ENTER ARENA NOW</button>
-    </div>
-  );
-}
-
 function ProfileView({ currentUser, setCurrentUser }) {
+  const [showModal, setShowModal] = useState(null); // 'deposit' or 'withdraw'
+  const [amount, setAmount] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handleTransaction = async () => {
+    const numAmount = parseInt(amount);
+    if (!numAmount || numAmount < 1000) return alert("Minimum amount is TZS 1,000");
+    if (showModal === 'withdraw' && numAmount > currentUser.balance) return alert("Insufficient balance!");
+
+    setIsProcessing(true);
+
+    // SIMULATE MOBILE MONEY API DELAY (Wait 3 seconds for user to "enter PIN" on USSD prompt)
+    setTimeout(async () => {
+      try {
+        const modifier = showModal === 'deposit' ? numAmount : -numAmount;
+        const newBalance = currentUser.balance + modifier;
+        
+        await supabase.from('users').update({ balance: newBalance }).eq('id', currentUser.id);
+        setCurrentUser(prev => ({ ...prev, balance: newBalance }));
+        
+        alert(`${showModal === 'deposit' ? 'Deposit' : 'Withdrawal'} Successful!`);
+        setShowModal(null);
+        setAmount('');
+      } catch (err) {
+        alert("Transaction Failed: " + err.message);
+      } finally {
+        setIsProcessing(false);
+      }
+    }, 3000);
+  };
+
   return (
     <div className="screen">
       <div style={{display: 'flex', alignItems: 'center', width: '100%', marginBottom: '30px'}}>
@@ -266,16 +282,53 @@ function ProfileView({ currentUser, setCurrentUser }) {
           <p style={{color: '#94a3b8', fontSize: '0.9rem', margin: 0}}>{currentUser.phone}</p>
         </div>
       </div>
+      
       <div className="card" style={{textAlign: 'center', padding: '30px 20px'}}>
         <p style={{color: '#94a3b8', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '1px'}}>Available Balance</p>
         <h3 style={{fontSize: '2.5rem', fontFamily: 'monospace', margin: '15px 0 25px 0'}}>TZS {currentUser.balance.toLocaleString()}</h3>
         <div style={{display: 'flex', gap: '15px'}}>
-          <button className="btn-success" style={{padding: '12px', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center'}}><ArrowDownToLine size={18} style={{marginRight: '8px'}}/> Deposit</button>
-          <button className="btn-outline" style={{marginTop: 0, padding: '12px', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.05)'}}><ArrowUpFromLine size={18} style={{marginRight: '8px'}}/> Withdraw</button>
+          <button className="btn-success" onClick={() => setShowModal('deposit')} style={{padding: '12px', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center'}}><ArrowDownToLine size={18} style={{marginRight: '8px'}}/> Deposit</button>
+          <button className="btn-outline" onClick={() => setShowModal('withdraw')} style={{marginTop: 0, padding: '12px', fontSize: '1rem', display: 'flex', justifyContent: 'center', alignItems: 'center', background: 'rgba(255,255,255,0.05)'}}><ArrowUpFromLine size={18} style={{marginRight: '8px'}}/> Withdraw</button>
         </div>
       </div>
+
       <div className="card" style={{padding: 0, overflow: 'hidden'}}><div style={{padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between'}}><span>Transaction History</span> <span style={{color: '#64748b'}}>&gt;</span></div><div style={{padding: '15px 20px', display: 'flex', justifyContent: 'space-between'}}><span>Payment Methods</span> <span style={{color: '#64748b'}}>Mobile Money &gt;</span></div></div>
       <button className="btn-outline" onClick={() => setCurrentUser(null)} style={{borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444', display: 'flex', justifyContent: 'center', alignItems: 'center'}}><LogOut size={20} style={{marginRight: '10px'}}/> LOGOUT</button>
+
+      {/* TRANSACTION MODAL */}
+      {showModal && (
+        <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'}}>
+          <div className="card" style={{margin: 0, position: 'relative', textAlign: 'center'}}>
+            <button onClick={() => !isProcessing && setShowModal(null)} style={{position: 'absolute', top: '15px', right: '15px', background: 'transparent', color: '#94a3b8'}}><X size={24}/></button>
+            <h2 style={{marginBottom: '20px', marginTop: '10px'}}>{showModal === 'deposit' ? 'Deposit Funds' : 'Withdraw Winnings'}</h2>
+            
+            {isProcessing ? (
+              <div style={{padding: '30px 0'}}>
+                <Loader2 className="animate-spin mx-auto" size={50} color="#3b82f6" style={{marginBottom: '20px'}}/>
+                <p style={{color: '#3b82f6', fontWeight: 'bold'}}>{showModal === 'deposit' ? 'Please check your phone for the M-Pesa/Tigo Pesa PIN prompt...' : 'Processing payout...'}</p>
+              </div>
+            ) : (
+              <>
+                <p style={{color: '#94a3b8', fontSize: '0.9rem', marginBottom: '15px'}}>Amount will be processed via {currentUser.phone}</p>
+                <input type="number" placeholder="Amount (TZS)" value={amount} onChange={(e) => setAmount(e.target.value)} style={{fontSize: '1.5rem', textAlign: 'center', fontWeight: 'bold'}} />
+                <button className="btn-primary" onClick={handleTransaction}>CONFIRM {showModal === 'deposit' ? 'DEPOSIT' : 'WITHDRAWAL'}</button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LandingView({ setActiveTab }) {
+  return (
+    <div className="screen">
+      <h1 className="title">123 BET</h1>
+      <p className="subtitle">Fastest PvP in Tanzania</p>
+      <div className="card"><h2 style={{ display: 'flex', alignItems: 'center', color: '#cffafe', marginBottom: '15px' }}><Info size={20} style={{ marginRight: '8px', color: '#38bdf8' }}/> How to Play</h2><p style={{ color: '#cbd5e1', fontSize: '0.9rem', lineHeight: '1.5' }}><strong>1.</strong> Match against a real player. Stake TZS 1,000.<br/><strong>2.</strong> You have 10 seconds to choose 1, 2, or 3.<br/><strong>3.</strong> The winner takes the pot instantly!</p></div>
+      <div className="card" style={{ background: 'rgba(49, 46, 129, 0.4)', borderColor: 'rgba(99, 102, 241, 0.3)' }}><h2 style={{ textAlign: 'center', color: '#e0e7ff', marginBottom: '20px' }}>Rules of Combat</h2><div className="rule-row"><div className="rule-box winner">1</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">3</div></div><div className="rule-row"><div className="rule-box winner">2</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">1</div></div><div className="rule-row"><div className="rule-box winner">3</div><span style={{color: '#94a3b8', fontSize: '0.8rem', fontWeight: 'bold'}}>BEATS</span><div className="rule-box">2</div></div></div>
+      <button className="btn-primary" onClick={() => setActiveTab('play')}>ENTER ARENA NOW</button>
     </div>
   );
 }
@@ -290,15 +343,12 @@ function LoginScreen({ setCurrentUser }) {
     setLoading(true);
     
     try {
-      // 1. Check if user exists
       const { data: user, error: fetchError } = await supabase.from('users').select('*').eq('phone', phone).maybeSingle();
       
       if (user) {
-        // Login existing user
         if (user.pin !== pin) throw new Error("Incorrect PIN");
         setCurrentUser(user);
       } else {
-        // Register new user with 5000 test balance
         const { data: newUser, error: insertError } = await supabase
           .from('users')
           .insert([{ phone, pin, balance: 5000 }])
