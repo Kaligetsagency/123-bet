@@ -1,9 +1,8 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { Home, Gamepad2, User, Wallet, ArrowDownToLine, ArrowUpFromLine, LogOut, Info, Loader2 } from 'lucide-react';
-import { supabase } from './supabase'; // CONNECTS TO YOUR DATABASE
+import { supabase } from './supabase'; 
 
-// Generate a random temporary ID for the user (until we build real accounts in Phase 2)
 const MY_USER_ID = Math.random().toString(36).substring(2, 15);
 
 export default function App() {
@@ -41,105 +40,127 @@ export default function App() {
 }
 
 function GameEngine({ balance, setBalance }) {
-  const [gameState, setGameState] = useState('lobby'); // lobby, searching, playing, result
+  const [gameState, setGameState] = useState('lobby'); 
   const [timer, setTimer] = useState(10);
   const [selectedNumber, setSelectedNumber] = useState(null);
   const [result, setResult] = useState(null);
   
-  // Real-time Match State
   const [matchId, setMatchId] = useState(null);
-  const [myRole, setMyRole] = useState(null); // 'player1' or 'player2'
+  const [myRole, setMyRole] = useState(null); 
   const [oppChoice, setOppChoice] = useState(null);
 
-  // Timer logic
   useEffect(() => {
     let interval;
     if (gameState === 'playing' && timer > 0) {
       interval = setInterval(() => setTimer((prev) => prev - 1), 1000);
     } else if (gameState === 'playing' && timer === 0) {
-      submitChoice(selectedNumber); // Auto-submit if time runs out
+      submitChoice(selectedNumber); 
     }
     return () => clearInterval(interval);
   }, [gameState, timer]);
 
-  // Matchmaking Engine
   const findMatch = async () => {
     if (balance < 1000) return alert("Insufficient funds.");
+    
+    // Deduct balance and set loading state
     setBalance(prev => prev - 1000);
     setGameState('searching');
     setSelectedNumber(null);
     setOppChoice(null);
 
-    // 1. Look for a waiting player
-    const { data: waitingMatch } = await supabase
-      .from('matches')
-      .select('*')
-      .eq('status', 'waiting')
-      .limit(1)
-      .single();
-
-    let currentMatchId;
-
-    if (waitingMatch) {
-      // Join as Player 2
-      const { data: updatedMatch } = await supabase
+    // ERROR CATCHER STARTS HERE
+    try {
+      // 1. Look for a waiting player safely
+      const { data: waitingMatch, error: fetchError } = await supabase
         .from('matches')
-        .update({ player2_id: MY_USER_ID, status: 'playing' })
-        .eq('id', waitingMatch.id)
-        .select().single();
-      
-      currentMatchId = updatedMatch.id;
-      setMyRole('player2');
-      setGameState('playing');
-      setTimer(10);
-    } else {
-      // Create new room as Player 1 and wait
-      const { data: newMatch } = await supabase
-        .from('matches')
-        .insert([{ player1_id: MY_USER_ID, status: 'waiting' }])
-        .select().single();
-      
-      currentMatchId = newMatch.id;
-      setMyRole('player1');
-    }
+        .select('*')
+        .eq('status', 'waiting')
+        .limit(1)
+        .maybeSingle(); // Prevents crashing if 0 rows are found
 
-    setMatchId(currentMatchId);
+      if (fetchError) throw new Error("Fetch Error: " + fetchError.message);
 
-    // Subscribe to real-time updates for THIS specific match
-    supabase.channel(`match_${currentMatchId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${currentMatchId}` }, (payload) => {
-        const updatedMatch = payload.new;
+      let currentMatchId;
+
+      if (waitingMatch) {
+        // Join as Player 2
+        const { data: updatedMatch, error: updateError } = await supabase
+          .from('matches')
+          .update({ player2_id: MY_USER_ID, status: 'playing' })
+          .eq('id', waitingMatch.id)
+          .select()
+          .single();
         
-        // If I was waiting and player 2 joined
-        if (updatedMatch.status === 'playing' && gameState !== 'playing') {
-          setGameState('playing');
-          setTimer(10);
-        }
+        if (updateError) throw new Error("Update Error: " + updateError.message);
+        if (!updatedMatch) throw new Error("Failed to join match data.");
 
-        // Check if both players have made their choices
-        if (updatedMatch.player1_choice && updatedMatch.player2_choice) {
-          evaluateWinner(updatedMatch);
-        }
-      }).subscribe();
+        currentMatchId = updatedMatch.id;
+        setMyRole('player2');
+        setGameState('playing');
+        setTimer(10);
+      } else {
+        // Create new room as Player 1
+        const { data: newMatch, error: insertError } = await supabase
+          .from('matches')
+          .insert([{ player1_id: MY_USER_ID, status: 'waiting' }])
+          .select()
+          .single();
+        
+        if (insertError) throw new Error("Insert Error: " + insertError.message);
+        if (!newMatch) throw new Error("Failed to create match data.");
+
+        currentMatchId = newMatch.id;
+        setMyRole('player1');
+      }
+
+      setMatchId(currentMatchId);
+
+      // Subscribe to real-time updates safely
+      supabase.channel(`match_${currentMatchId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${currentMatchId}` }, (payload) => {
+          const updatedMatch = payload.new;
+          
+          if (updatedMatch.status === 'playing') {
+            setGameState(prev => {
+               if (prev !== 'playing') {
+                 setTimer(10);
+                 return 'playing';
+               }
+               return prev;
+            });
+          }
+
+          if (updatedMatch.player1_choice && updatedMatch.player2_choice) {
+            evaluateWinner(updatedMatch);
+          }
+        }).subscribe((status, err) => {
+           if (err) { alert("Realtime Error: " + err.message); }
+        });
+
+    } catch (err) {
+      // IF ANYTHING FAILS, IT ALERTS YOU AND REFUNDS THE MONEY
+      alert("System Failed: " + err.message);
+      setGameState('lobby');
+      setBalance(prev => prev + 1000); 
+    }
   };
 
   const submitChoice = async (choice) => {
-    if (!choice && timer > 0) return; // Prevent early blank submits
-    
-    // Send my choice to the database
-    const updatePayload = myRole === 'player1' ? { player1_choice: choice || 0 } : { player2_choice: choice || 0 };
-    
-    await supabase
-      .from('matches')
-      .update(updatePayload)
-      .eq('id', matchId);
+    if (!choice && timer > 0) return; 
+    try {
+      const updatePayload = myRole === 'player1' ? { player1_choice: choice || 0 } : { player2_choice: choice || 0 };
+      const { error } = await supabase.from('matches').update(updatePayload).eq('id', matchId);
+      if (error) alert("Choice failed to send: " + error.message);
+    } catch (err) {
+      alert("Submission Error: " + err.message);
+    }
   };
 
   const evaluateWinner = (matchData) => {
     const myMove = myRole === 'player1' ? matchData.player1_choice : matchData.player2_choice;
     const oppMove = myRole === 'player1' ? matchData.player2_choice : matchData.player1_choice;
     
-    setOppChoice(oppMove === 0 ? 'X' : oppMove); // 0 means they timed out
+    setOppChoice(oppMove === 0 ? 'X' : oppMove); 
 
     if (myMove === 0) {
       setResult('TIMEOUT LOSS');
@@ -241,7 +262,6 @@ function GameEngine({ balance, setBalance }) {
   );
 }
 
-// --- KEEP THESE COMPONENTS EXACTLY THE SAME AS BEFORE ---
 function LandingView({ setActiveTab }) {
   return (
     <div className="screen">
