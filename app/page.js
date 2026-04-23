@@ -46,10 +46,14 @@ function GameEngine({ currentUser, setCurrentUser }) {
   const [myRole, setMyRole] = useState(null); 
   const [oppChoice, setOppChoice] = useState(null);
 
+  // SECURE SERVER TRANSACTION
   const changeBalance = async (amount) => {
-    const newBalance = currentUser.balance + amount;
-    await supabase.from('users').update({ balance: newBalance }).eq('id', currentUser.id);
-    setCurrentUser(prev => ({ ...prev, balance: newBalance }));
+    try {
+      await supabase.rpc('process_transaction', { target_user_id: currentUser.id, amount: amount });
+      setCurrentUser(prev => ({ ...prev, balance: prev.balance + amount }));
+    } catch (err) {
+      console.error("Secure transaction failed:", err.message);
+    }
   };
 
   useEffect(() => {
@@ -240,10 +244,11 @@ function GameEngine({ currentUser, setCurrentUser }) {
 }
 
 function ProfileView({ currentUser, setCurrentUser }) {
-  const [showModal, setShowModal] = useState(null); // 'deposit' or 'withdraw'
+  const [showModal, setShowModal] = useState(null); 
   const [amount, setAmount] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
+  // SECURE SERVER TRANSACTION FOR DEPOSITS/WITHDRAWALS
   const handleTransaction = async () => {
     const numAmount = parseInt(amount);
     if (!numAmount || numAmount < 1000) return alert("Minimum amount is TZS 1,000");
@@ -251,14 +256,13 @@ function ProfileView({ currentUser, setCurrentUser }) {
 
     setIsProcessing(true);
 
-    // SIMULATE MOBILE MONEY API DELAY (Wait 3 seconds for user to "enter PIN" on USSD prompt)
     setTimeout(async () => {
       try {
         const modifier = showModal === 'deposit' ? numAmount : -numAmount;
-        const newBalance = currentUser.balance + modifier;
         
-        await supabase.from('users').update({ balance: newBalance }).eq('id', currentUser.id);
-        setCurrentUser(prev => ({ ...prev, balance: newBalance }));
+        // Use the secure RPC function
+        await supabase.rpc('process_transaction', { target_user_id: currentUser.id, amount: modifier });
+        setCurrentUser(prev => ({ ...prev, balance: prev.balance + modifier }));
         
         alert(`${showModal === 'deposit' ? 'Deposit' : 'Withdrawal'} Successful!`);
         setShowModal(null);
@@ -295,7 +299,6 @@ function ProfileView({ currentUser, setCurrentUser }) {
       <div className="card" style={{padding: 0, overflow: 'hidden'}}><div style={{padding: '15px 20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', justifyContent: 'space-between'}}><span>Transaction History</span> <span style={{color: '#64748b'}}>&gt;</span></div><div style={{padding: '15px 20px', display: 'flex', justifyContent: 'space-between'}}><span>Payment Methods</span> <span style={{color: '#64748b'}}>Mobile Money &gt;</span></div></div>
       <button className="btn-outline" onClick={() => setCurrentUser(null)} style={{borderColor: 'rgba(239, 68, 68, 0.3)', color: '#ef4444', display: 'flex', justifyContent: 'center', alignItems: 'center'}}><LogOut size={20} style={{marginRight: '10px'}}/> LOGOUT</button>
 
-      {/* TRANSACTION MODAL */}
       {showModal && (
         <div style={{position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px'}}>
           <div className="card" style={{margin: 0, position: 'relative', textAlign: 'center'}}>
